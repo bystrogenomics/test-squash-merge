@@ -1,0 +1,48 @@
+name: Squash Commits on PR
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  squashCommits:
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/squash')
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0  # Fetch all history for all branches and tags
+
+    - name: Squash Commits in PR
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PULL_REQUEST_NUMBER: ${{ github.event.issue.number }}
+        COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+      run: |
+        #!/bin/bash
+        set -e
+
+        # Fetch the PR details
+        PR_DETAILS=$(gh pr view "$PULL_REQUEST_NUMBER" --json author,headRefName --jq '. | {author: .author.login, headRefName}')
+        PR_AUTHOR=$(echo "$PR_DETAILS" | jq -r '.author')
+        HEAD_BRANCH=$(echo "$PR_DETAILS" | jq -r '.headRefName')
+
+        # Check if the commenter is the PR author
+        if [ "$COMMENT_AUTHOR" != "$PR_AUTHOR" ]; then
+          echo "Only the PR author can squash commits."
+          exit 1
+        fi
+
+        # Check out the PR head branch
+        git fetch origin "$HEAD_BRANCH"
+        git checkout "$HEAD_BRANCH"
+
+        # Squash commits
+        MAIN_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+        git reset --soft "origin/$MAIN_BRANCH"
+        git commit -m "Squash commits in PR #$PULL_REQUEST_NUMBER"
+
+        # Force push the changes to the PR branch
+        git push origin "$HEAD_BRANCH" --force
